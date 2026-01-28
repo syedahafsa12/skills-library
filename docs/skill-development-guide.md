@@ -1,459 +1,214 @@
 # Skill Development Guide
 
-## Introduction
-
-This guide explains how to create reusable skills for AI coding agents (Claude Code, Goose, OpenAI Codex) using the **MCP Code Execution** pattern. Skills enable AI agents to autonomously build and deploy applications with minimal token usage.
-
-## Why Skills Matter
-
-**Traditional Approach: High Token Usage**
-```
-MCP Server Loaded → 50,000 tokens in context
-Every tool call → Full data flows through context
-Result: 41% of context consumed before work begins
-```
-
-**Skills Approach: Maximum Efficiency**
-```
-SKILL.md → ~100 tokens
-Scripts execute → 0 tokens (run outside context)
-Only results → ~10 tokens back to agent
-Result: 3% context usage, 97% free for work
-```
-
-## Skill Anatomy
-
-### Directory Structure
-
-```
-.claude/skills/
-└── my-skill-name/
-    ├── SKILL.md           # ~100 token instructions (REQUIRED)
-    ├── REFERENCE.md       # Detailed docs (loaded on-demand)
-    ├── scripts/           # Executable scripts (0 tokens)
-    │   ├── deploy.sh
-    │   ├── verify.py
-    │   └── helpers/
-    └── templates/         # Optional configuration templates
-        └── config.yaml
-```
-
-### SKILL.md Format
-
-**CRITICAL**: Must have YAML frontmatter and follow this structure:
-
-\`\`\`markdown
----
-name: skill-name
-description: Brief one-line description of what this skill does
----
-
-# Skill Name
-
-## When to Use
-- Bullet points explaining when an AI agent should invoke this skill
-- Specific triggers or user requests
-- Use cases
-
-## Instructions
-1. Step 1: Run this script with these parameters
-2. Step 2: Verify the result
-3. Step 3: Confirm success before proceeding
-
-## Prerequisites
-- Required tools or dependencies
-- Cluster requirements
-- Access credentials
-
-## Validation
-- [ ] Success criterion 1
-- [ ] Success criterion 2
-- [ ] Expected state after completion
-
-See [REFERENCE.md](./REFERENCE.md) for advanced configuration.
-\`\`\`
+This guide explains how to create effective skills for AI agents using the MCP Code Execution pattern.
 
 ## The MCP Code Execution Pattern
 
-### Pattern Overview
+### The Problem
+Direct MCP integration causes token bloat:
+- MCP tool definitions consume 10,000+ tokens at startup
+- Large datasets flow through context multiple times
+- A 10,000-row dataset can consume 50,000+ tokens
 
-Instead of loading MCP tools directly into agent context:
-
-**Before (Direct MCP)**
-```javascript
-// This all flows through agent context
-const data = await mcp.getDocument('huge-file');
-const filtered = data.filter(item => item.status === 'active');
-// 50,000 tokens consumed
+### The Solution
+Wrap MCP calls in code execution scripts:
+```
+SKILL.md (~100 tokens) → scripts/ (0 tokens loaded) → minimal result
 ```
 
-**After (Skill + Script)**
+## Skill Structure
 
-SKILL.md:
-\`\`\`markdown
-## Instructions
-1. Run: \`python scripts/filter_data.py <document_id> <filter_criteria>\`
-2. Review output
-\`\`\`
+Each skill should follow this structure:
+```
+.cloude/skills/skill-name/
+├── SKILL.md              # Instructions (~100 tokens)
+├── scripts/              # Heavy lifting (0 tokens loaded)
+│   ├── *.sh
+│   └── *.py
+└── REFERENCE.md          # Detailed documentation
+```
 
-scripts/filter_data.py:
-\`\`\`python
-# Script runs outside agent context
-data = mcp_client.get_document(doc_id)
-filtered = [item for item in data if item.status == filter_criteria]
-print(f"Found {len(filtered)} items")  # Only this enters context
-\`\`\`
+### SKILL.md Requirements
+- YAML frontmatter with name and description
+- Clear usage instructions
+- Validation criteria
+- Links to REFERENCE.md
 
-**Result**: 100 tokens instead of 50,000
-
-## Creating Your First Skill
-
-### Example: Kubernetes Pod Lister
-
-**Step 1: Create Directory**
-\`\`\`bash
-mkdir -p .claude/skills/k8s-pod-list
-cd .claude/skills/k8s-pod-list
-\`\`\`
-
-**Step 2: Write SKILL.md**
-\`\`\`markdown
+Example:
+```yaml
 ---
-name: k8s-pod-list
-description: List Kubernetes pods across namespaces with status filtering
+name: example-skill
+description: Example skill description
 ---
-
-# Kubernetes Pod Lister
+# Example Skill
 
 ## When to Use
-- User asks "show me pods" or "list running pods"
-- Need to check cluster health
-- Debugging deployment issues
+- When user wants to do X
+- When setting up Y
 
 ## Instructions
-1. List all pods: \`python scripts/list_pods.py\`
-2. Filter by namespace: \`python scripts/list_pods.py --namespace <name>\`
-3. Filter by status: \`python scripts/list_pods.py --status Running\`
-
-## Prerequisites
-- kubectl configured and authenticated
-- Python 3.8+ with kubectl installed
+1. Run: `bash scripts/example.sh`
+2. Verify: `python scripts/verify.py`
 
 ## Validation
-- [ ] Script returns pod list without errors
-- [ ] Output is formatted and readable
-- [ ] Status filters work correctly
-\`\`\`
+- [ ] Task completed successfully
+- [ ] All components running
+```
 
-**Step 3: Create Script**
-\`\`\`python
-#!/usr/bin/env python3
-# scripts/list_pods.py
-import subprocess
-import json
-import sys
-import argparse
+### Script Best Practices
+- Return minimal output to agent context
+- Handle errors gracefully
+- Provide clear status messages
+- Use consistent naming conventions
 
-def list_pods(namespace=None, status=None):
-    cmd = ["kubectl", "get", "pods"]
+## Token Efficiency Patterns
 
-    if namespace:
-        cmd.extend(["-n", namespace])
-    else:
-        cmd.append("--all-namespaces")
+### 1. Filter Pattern
+Instead of returning large datasets, filter in scripts:
+```python
+# Inefficient - returns full dataset to context
+def get_data():
+    return mcp.get_large_dataset()  # Returns 10,000 records
 
-    cmd.extend(["-o", "json"])
+# Efficient - filters in script, returns summary
+def get_filtered_data():
+    full_data = mcp.get_large_dataset()
+    filtered = [item for item in full_data if meets_criteria(item)]
+    return {"count": len(filtered), "sample": filtered[:5]}
+```
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    pods = json.loads(result.stdout)["items"]
+### 2. Aggregate Pattern
+Process data in scripts, return insights:
+```python
+# Inefficient - returns raw data
+def get_student_scores():
+    return mcp.get_all_scores()  # Thousands of records
 
-    # Filter by status if specified
-    if status:
-        pods = [p for p in pods if p["status"]["phase"] == status]
-
-    # Output minimal summary (NOT full JSON)
-    print(f"Found {len(pods)} pods")
-    for pod in pods[:10]:  # Show first 10
-        name = pod["metadata"]["name"]
-        ns = pod["metadata"]["namespace"]
-        phase = pod["status"]["phase"]
-        print(f"  {ns}/{name}: {phase}")
-
-    if len(pods) > 10:
-        print(f"  ... and {len(pods) - 10} more")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--namespace", help="Filter by namespace")
-    parser.add_argument("--status", help="Filter by status (Running, Pending, etc)")
-    args = parser.parse_args()
-
-    list_pods(args.namespace, args.status)
-\`\`\`
-
-**Step 4: Make Executable**
-\`\`\`bash
-chmod +x scripts/list_pods.py
-\`\`\`
-
-**Step 5: Test**
-\`\`\`bash
-# Test locally first
-python scripts/list_pods.py --status Running
-
-# Then test with Claude Code
-claude "Show me all running pods"
-\`\`\`
-
-## Best Practices
-
-### 1. Minimal Output
-
-**❌ BAD: Returns full data**
-\`\`\`python
-print(json.dumps(all_pods))  # 10,000 tokens
-\`\`\`
-
-**✅ GOOD: Returns summary**
-\`\`\`python
-print(f"Found {len(all_pods)} pods, {running} running")  # 15 tokens
-\`\`\`
-
-### 2. Clear Error Messages
-
-**❌ BAD: Stack trace**
-\`\`\`python
-raise Exception("Failed")  # Agent sees full stack trace
-\`\`\`
-
-**✅ GOOD: Actionable error**
-\`\`\`python
-if not cluster_reachable:
-    print("✗ Cannot connect to cluster. Run 'kubectl cluster-info'")
-    sys.exit(1)
-\`\`\`
-
-### 3. Idempotency
-
-Scripts should be safe to run multiple times:
-
-\`\`\`bash
-# Create namespace if it doesn't exist
-kubectl create namespace myapp --dry-run=client -o yaml | kubectl apply -f -
-\`\`\`
-
-### 4. Verification Steps
-
-Always include a verification step:
-
-\`\`\`markdown
-## Instructions
-1. Deploy: \`./scripts/deploy.sh\`
-2. Verify: \`python scripts/verify.py\`  ← CRITICAL
-3. Only proceed if verification passes
-\`\`\`
-
-### 5. Use REFERENCE.md for Details
-
-Keep SKILL.md under 150 tokens. Move detailed docs to REFERENCE.md:
-
-**SKILL.md**
-\`\`\`markdown
-## Instructions
-1. Deploy Kafka: \`./scripts/deploy.sh\`
-2. See [REFERENCE.md](./REFERENCE.md) for custom configuration
-\`\`\`
-
-**REFERENCE.md**
-\`\`\`markdown
-# Kafka Deployment Reference
-
-## Configuration Options
-
-### Replication Factor
-Default: 1 (development)
-Production: 3
-
-Edit scripts/deploy.sh and change:
-\`--set replication.factor=3\`
-
-### Resource Limits
-...
-\`\`\`
-
-## Common Patterns
-
-### Pattern 1: Deploy + Verify
-
-\`\`\`markdown
-## Instructions
-1. Deploy: \`./scripts/deploy.sh <component>\`
-2. Wait for ready: \`python scripts/wait_ready.py <component>\`
-3. Verify health: \`python scripts/verify.py <component>\`
-\`\`\`
-
-### Pattern 2: Conditional Execution
-
-\`\`\`bash
-# Check if already deployed
-if kubectl get deployment myapp -n default &>/dev/null; then
-    echo "✓ Already deployed"
-else
-    echo "Deploying..."
-    kubectl apply -f manifests/
-fi
-\`\`\`
-
-### Pattern 3: MCP Server Wrapper
-
-\`\`\`python
-# scripts/mcp_client.py - Wraps MCP server calls
-from mcp import Client
-
-def get_filtered_data(doc_id, filter_type):
-    client = Client("mcp-server-name")
-    raw_data = client.get_document(doc_id)
-
-    # Filter CLIENT-SIDE, not in agent context
-    filtered = [item for item in raw_data if item.type == filter_type]
-
-    # Return minimal summary
+# Efficient - aggregates in script
+def get_score_summary():
+    scores = mcp.get_all_scores()
     return {
-        "total": len(raw_data),
-        "filtered": len(filtered),
-        "sample": filtered[:3]  # Just 3 examples
+        "average": sum(scores) / len(scores),
+        "highest": max(scores),
+        "lowest": min(scores)
     }
-\`\`\`
+```
 
-## Testing Your Skills
+### 3. Process Pattern
+Transform data in scripts:
+```python
+# Inefficient - processing in context
+def analyze_trends():
+    return mcp.get_raw_logs()  # Full logs to context
 
-### Local Testing
+# Efficient - processing in script
+def get_trend_insights():
+    logs = mcp.get_raw_logs()
+    trends = process_logs_for_trends(logs)
+    return {"key_trends": trends, "time_periods": get_time_periods(logs)}
+```
 
-\`\`\`bash
-# 1. Test script directly
-cd .claude/skills/my-skill
-./scripts/deploy.sh
+## Cross-Agent Compatibility
 
-# 2. Check output format
-python scripts/verify.py | wc -l  # Should be < 20 lines
+Skills should work with both Claude Code and Goose:
+- Use standard shell commands
+- Include proper error handling
+- Test with both agents
+- Follow platform-agnostic patterns
 
-# 3. Test with both agents
-claude "Use my-skill to deploy"
-goose "Use my-skill to deploy"
-\`\`\`
+## Validation and Testing
 
-### Validation Checklist
+Each skill should include:
+- Clear validation criteria in SKILL.md
+- Verification scripts
+- Example usage scenarios
+- Error handling tests
 
-- [ ] SKILL.md has valid YAML frontmatter
-- [ ] SKILL.md is under 200 tokens
-- [ ] Scripts execute without errors
-- [ ] Scripts return minimal output (< 50 lines)
-- [ ] Works on both Claude Code and Goose
-- [ ] Includes verification step
-- [ ] Handles errors gracefully
-- [ ] Is idempotent (safe to run multiple times)
+## Common Pitfalls to Avoid
 
-## Advanced Topics
+1. **Verbose Output**: Scripts should return minimal information
+2. **Complex Logic in Context**: Move processing to scripts
+3. **Missing Error Handling**: Always handle potential failures
+4. **Hardcoded Values**: Use parameters and environment variables
+5. **Inconsistent Naming**: Follow established patterns
 
-### Multi-Step Skills
+## Example: Good vs Bad
 
-For complex workflows, break into multiple skills:
+### Bad Example
+```bash
+#!/bin/bash
+# This script returns verbose output to context
+echo "Starting deployment..."
+kubectl get pods -A  # Returns hundreds of lines
+helm install my-app chart/  # May return lots of output
+kubectl describe deployment my-app  # Returns detailed status
+```
 
-\`\`\`
-.claude/skills/
-├── kafka-deploy/        # Step 1: Deploy Kafka
-├── kafka-topic-create/  # Step 2: Create topics
-└── kafka-producer/      # Step 3: Test producer
-\`\`\`
-
-### Cross-Agent Compatibility
-
-Both Claude Code and Goose read `.claude/skills/`:
-
-\`\`\`bash
-# Same skills work on both!
-claude "Deploy Kafka"
-goose "Deploy Kafka"
-\`\`\`
-
-### Token Efficiency Metrics
-
-Measure your skills:
-
-**Before (Direct MCP)**
-- Startup: 50,000 tokens
-- Per operation: 5,000 tokens
-- Total for 10 ops: 100,000 tokens
-
-**After (Skills)**
-- Startup: 0 tokens
-- Per operation: 100 tokens (SKILL.md) + 20 tokens (output)
-- Total for 10 ops: 1,200 tokens
-
-**Efficiency: 98.8% reduction**
+### Good Example
+```bash
+#!/bin/bash
+# This script returns minimal output
+echo "Deploying my-app..."
+if helm install my-app chart/; then
+    if kubectl wait deployment/my-app --for condition=Available=True --timeout=300s; then
+        echo "✓ Deployment successful"
+    else
+        echo "✗ Deployment failed - timeout"
+        exit 1
+    fi
+else
+    echo "✗ Helm install failed"
+    exit 1
+fi
+```
 
 ## Troubleshooting
 
-### Skill Not Loading
+### Token Usage Too High
+- Move data processing from agent context to scripts
+- Implement filtering and aggregation
+- Reduce output verbosity
 
-\`\`\`bash
-# Check YAML syntax
-head -5 .claude/skills/my-skill/SKILL.md
+### Skill Not Triggering
+- Check YAML frontmatter format
+- Verify file placement in `.claude/skills/`
+- Ensure name matches what agent is requesting
 
-# Should show:
-# ---
-# name: my-skill
-# description: ...
-# ---
-\`\`\`
+### Scripts Failing
+- Test scripts independently
+- Check permissions and dependencies
+- Add proper error handling
 
-### Script Fails
+## Performance Metrics
 
-\`\`\`bash
-# Test script directly
-cd .claude/skills/my-skill
-bash -x scripts/deploy.sh  # Debug mode
+Track these metrics for each skill:
+- Token usage reduction percentage
+- Execution time
+- Success rate
+- Agent satisfaction scores
 
-# Check permissions
-chmod +x scripts/*.sh
-\`\`\`
+## Advanced Patterns
 
-### Agent Doesn't Use Skill
+### MCP Client Wrapper
+Create reusable MCP client patterns:
+```python
+class MCPClient:
+    def efficient_get_data(self, dataset_id, filter_func=None):
+        """Get data efficiently with optional filtering"""
+        raw_data = self.mcp_get(dataset_id)
+        if filter_func:
+            filtered_data = [d for d in raw_data if filter_func(d)]
+        else:
+            filtered_data = raw_data
+        return self.summarize(filtered_data)
+```
 
-Make sure "When to Use" is clear:
+### Configuration Management
+Use configuration files for flexibility:
+```bash
+# Use config file instead of hardcoded values
+source scripts/config.sh
+kubectl create ns ${NAMESPACE:-"default"}
+```
 
-\`\`\`markdown
-## When to Use
-- User says "deploy Kafka" ← EXACT PHRASE
-- User wants event streaming ← CONCEPT
-- Setting up microservices ← CONTEXT
-\`\`\`
-
-## Examples from LearnFlow
-
-See the LearnFlow hackathon project for real-world examples:
-
-- `kafka-k8s-setup` - Deploy stateful infrastructure
-- `fastapi-dapr-agent` - Generate microservice templates
-- `postgres-k8s-setup` - Database deployment with migrations
-- `nextjs-k8s-deploy` - Frontend containerization
-
-## Resources
-
-- [AAIF Standards](https://aaif.io/)
-- [MCP Code Execution Blog](https://www.anthropic.com/engineering/code-execution-with-mcp)
-- [Claude Code Skills Docs](https://code.claude.com/docs/en/skills)
-- [Goose Skills Guide](https://block.github.io/goose/docs/guides/context-engineering/using-skills)
-
-## Summary
-
-**Creating a skill:**
-1. Create `.claude/skills/<name>/` directory
-2. Write SKILL.md with YAML frontmatter (~100 tokens)
-3. Create executable scripts (return minimal output)
-4. Add REFERENCE.md for detailed docs
-5. Test with both Claude Code and Goose
-
-**Key principle:** Scripts do the work (0 tokens), only results flow back.
-
-Your skills become **reusable intelligence** that works across projects and AI agents.
+This guide helps ensure all skills follow best practices for token efficiency, cross-agent compatibility, and maintainability.

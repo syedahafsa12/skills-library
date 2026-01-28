@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash scripts/deploy.sh:*)",
+      "Skill(kafka-k8s-setup)",
+      "Bash(bash \"E:\\hackathon3 - Copy\\hack3\\skills-library\\.claude\\skills\\kafka-k8s-setup\\scripts\\deploy.sh\")",
+      "Bash(python:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl run:*)",
+      "Bash(kubectl wait:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl apply:*)",
+      "Skill(agents-md-gen)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
